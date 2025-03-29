@@ -41,10 +41,13 @@ retriever = vector_store.as_retriever(
     search_kwargs={"k": 5, "score_threshold": 0.6},
 )
 
-# Perform a retrieval query
-query = "what did you have for breakfast?"
+# Perform a retrieval query (you can replace this with user input)
+query = input("Enter your query: ")  # User input for the query
+
+# Retrieve results
 results = retriever.retrieve(query)
 
 print("RESULTS:")
 for res in results:
     print(f"* {res.page_content} [{res.metadata}]")
+
