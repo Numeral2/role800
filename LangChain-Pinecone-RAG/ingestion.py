@@ -23,7 +23,7 @@ def ingest_pdf(pinecone_api_key, pinecone_index_name, uploaded_pdf_path):
     if pinecone_index_name not in existing_indexes:
         pc.create_index(
             name=pinecone_index_name,
-            dimension=768,  # Adjusted dimension for Hugging Face model
+            dimension=384,  # Adjusted dimension for Hugging Face model
             metric="cosine",
             spec=ServerlessSpec(cloud="aws", region="us-east-1"),
         )
