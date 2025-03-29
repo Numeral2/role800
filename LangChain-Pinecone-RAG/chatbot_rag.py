@@ -75,7 +75,7 @@ if pinecone_api_key and openai_api_key and pinecone_index_name and perplexity_ap
         st.session_state.messages.append(SystemMessage(system_prompt))
 
         # Invoke Perplexity API
-        perplexity_url = "https://api.perplexity.ai/chat/completions"
+        perplexity_url = "https://api.perplexity.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {perplexity_api_key}", "Content-Type": "application/json"}
         payload = {
             "model": "sonar",
@@ -102,8 +102,10 @@ if pinecone_api_key and openai_api_key and pinecone_index_name and perplexity_ap
             response.raise_for_status()
             response_json = response.json()
             result = response_json.get("choices", [{}])[0].get("message", {}).get("content", "Error: No response from Perplexity API")
+        except requests.exceptions.HTTPError as e:
+            result = f"HTTP Error: {e.response.status_code} - {e.response.text}"
         except requests.exceptions.RequestException as e:
-            result = f"Error: {str(e)}"
+            result = f"Request Error: {str(e)}"
         except requests.exceptions.JSONDecodeError:
             result = "Error: Invalid JSON response from Perplexity API."
 
@@ -113,3 +115,4 @@ if pinecone_api_key and openai_api_key and pinecone_index_name and perplexity_ap
 
 else:
     st.warning("Please enter your API keys to proceed.")
+
