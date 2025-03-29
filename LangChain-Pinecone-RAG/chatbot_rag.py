@@ -4,7 +4,6 @@ import pdfplumber
 import pinecone
 import openai
 from sentence_transformers import SentenceTransformer
-from langchain_pinecone import PineconeVectorStore
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 st.title("Chat with Your PDF (GPT-4o-mini & Hugging Face)")
@@ -37,7 +36,6 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
 
     # Use Hugging Face embeddings model
     embedding_model = SentenceTransformer("BAAI/bge-small-en")  # Free & lightweight
-    vector_store = PineconeVectorStore(index=index, embedding=embedding_model)
 
     st.success("Pinecone and Hugging Face embeddings initialized!")
 
@@ -57,8 +55,14 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
             for page_num, idx, chunk in pdf_chunks
         ]
 
-        # Embed & store in Pinecone
-        vector_store.add_documents(documents=[d["content"] for d in documents])
+        # Embed text and store in Pinecone
+        embeddings = [embedding_model.encode(doc["content"]) for doc in documents]
+        vectors_to_upsert = [
+            {"id": f"{doc['metadata']['page']}_{doc['metadata']['chunk']}", "values": embedding, "metadata": doc['metadata']}
+            for doc, embedding in zip(documents, embeddings)
+        ]
+        index.upsert(vectors=vectors_to_upsert)
+
         st.success("File processed and stored in Pinecone.")
 
     # Initialize chat history
@@ -74,9 +78,10 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
             st.session_state.messages.append(HumanMessage(prompt))
 
         # Retrieve context from Pinecone
-        retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 3})
-        docs = retriever.invoke(prompt)
-        context = "\n".join(d.page_content for d in docs)
+        query_embedding = embedding_model.encode(prompt)
+        results = index.query(query=query_embedding, top_k=3, include_metadata=True)
+
+        context = "\n".join([f"Page {match['metadata']['page']}, Chunk {match['metadata']['chunk']}: {match['metadata']['content']}" for match in results['matches']])
 
         system_prompt = f"Context: {context}\n\nAnswer the user's question based on the above context."
         st.session_state.messages.append(SystemMessage(system_prompt))
@@ -99,4 +104,3 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
 
 else:
     st.warning("Please enter your API keys to proceed.")
-
