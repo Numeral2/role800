@@ -1,57 +1,39 @@
-# import basics
 import os
 from dotenv import load_dotenv
-
-# import pinecone
-from pinecone import Pinecone, ServerlessSpec
-
-# import langchain
+import pinecone
+from sentence_transformers import SentenceTransformer
 from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 
 load_dotenv()
 
-# initialize pinecone database
-pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
+# 🔹 Initialize Pinecone
+pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
 
-# set the pinecone index
-
+# 🔹 Set up Pinecone index
 index_name = "quickstart"
-index = pc.Index(index_name)
 
-# initialize embeddings model + vector store
+if index_name not in pinecone.list_indexes():
+    pinecone.create_index(
+        name=index_name,
+        dimension=768,  # Matching Hugging Face embedding size
+        metric="cosine"
+    )
 
-embeddings = OpenAIEmbeddings(model="text-embedding-3-large",api_key=os.environ.get("OPENAI_API_KEY"))
-vector_store = PineconeVectorStore(index=index, embedding=embeddings)
+index = pinecone.Index(index_name)
 
-# retrieval
-'''
+# 🔹 Use Hugging Face Embeddings (Replaces OpenAI)
+embedding_model = SentenceTransformer("BAAI/bge-small-en")
+vector_store = PineconeVectorStore(index=index, embedding=embedding_model)
 
-###### add docs to db ##############################
-results = vector_store.similarity_search_with_score(
-    "what did you have for breakfast?",
-    #k=2,
-    filter={"source": "tweet"},
-)
-
-print("RESULTS:")
-
-for res in results:
-    print(f"* {res[0].page_content} [{res[0].metadata}] -- {res[1]}")
-
-'''
-
+# 🔹 Retrieve Similar Documents
 retriever = vector_store.as_retriever(
     search_type="similarity_score_threshold",
     search_kwargs={"k": 5, "score_threshold": 0.6},
 )
-results = retriever.invoke("what did you have for breakfast?")
+
+results = retriever.retrieve("what did you have for breakfast?")
 
 print("RESULTS:")
-
 for res in results:
     print(f"* {res.page_content} [{res.metadata}]")
-
-#'''
-
