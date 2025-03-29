@@ -1,62 +1,60 @@
 import os
 import time
-import pdfplumber
-import tiktoken
 from dotenv import load_dotenv
-from pinecone import Pinecone, ServerlessSpec
+import pinecone
+from sentence_transformers import SentenceTransformer
 from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
 
 load_dotenv()
 
 # Initialize Pinecone
-pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
-index_name = "quickstart"  # Change if needed
+pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
+
+# Initialize Pinecone database
+index_name = "quickstart"  # Change if desired
 
 # Check if index exists, and create if not
-existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
-if index_name not in existing_indexes:
-    pc.create_index(
+if index_name not in pinecone.list_indexes():
+    pinecone.create_index(
         name=index_name,
-        dimension=3072,
-        metric="cosine",
-        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+        dimension=768,  # Change based on the model used (768 for small models, 1024+ for larger)
+        metric="cosine"
     )
-    while not pc.describe_index(index_name).status["ready"]:
+    while not pinecone.describe_index(index_name).status["ready"]:
         time.sleep(1)
 
-index = pc.Index(index_name)
-embeddings = OpenAIEmbeddings(model="text-embedding-3-large", api_key=os.environ.get("OPENAI_API_KEY"))
-vector_store = PineconeVectorStore(index=index, embedding=embeddings)
+index = pinecone.Index(index_name)
 
-# Tokenizer setup for chunking
-tokenizer = tiktoken.get_encoding("cl100k_base")
-MAX_TOKENS = 2048  # Ensures each chunk is under OpenAI’s 4096-token limit
+# Initialize Hugging Face embeddings model
+embedding_model = SentenceTransformer("BAAI/bge-small-en")  # Lightweight & free
+vector_store = PineconeVectorStore(index=index, embedding=embedding_model)
 
-# Function to extract and chunk PDF text
-def extract_and_chunk_pdf(pdf_path):
-    documents = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
-            tokens = tokenizer.encode(text)
-            for i in range(0, len(tokens), MAX_TOKENS):
-                chunk_tokens = tokens[i:i + MAX_TOKENS]
-                chunk_text = tokenizer.decode(chunk_tokens)
-                documents.append(Document(
-                    page_content=chunk_text,
-                    metadata={"document_id": pdf_path, "chunk_id": f"{page_num}_{i}", "page_number": page_num}
-                ))
-    return documents
+# Function to chunk documents
+def chunk_text(text, chunk_size=512):
+    """Splits text into smaller chunks"""
+    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
 
-# Ingest the PDF
-pdf_path = "your_pdf.pdf"  # Change to your actual PDF path
-documents = extract_and_chunk_pdf(pdf_path)
+# Example: Reading a large document (you can replace this with PDF text extraction)
+large_document_text = """
+    (Large document text here, this would be the content of your 20+ pages of PDF)
+    """
 
-# Generate unique IDs
+# Chunk the document into smaller pieces
+chunks = chunk_text(large_document_text, chunk_size=512)
+
+# Create documents from chunks with minimal metadata
+documents = [
+    Document(
+        page_content=chunk,
+        metadata={"document_id": "doc1", "chunk_id": f"chunk{i+1}", "page_number": (i // 5) + 1}
+    ) for i, chunk in enumerate(chunks)
+]
+
+# Generate unique ids for each chunk
 uuids = [doc.metadata["chunk_id"] for doc in documents]
 
-# Store in Pinecone
+# Add the chunks to Pinecone with minimal metadata
 vector_store.add_documents(documents=documents, ids=uuids)
-print(f"Successfully added {len(documents)} chunks to Pinecone.")
+
+print(f"Successfully added {len(documents)} document chunks to Pinecone.")
