@@ -30,8 +30,8 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
     st.session_state["PINECONE_INDEX_NAME"] = pinecone_index_name
     st.session_state["OPENAI_API_KEY"] = openai_api_key
 
-    # Initialize Pinecone
-    pinecone.init(api_key=pinecone_api_key, environment="us-east-1")
+    # Initialize Pinecone with "us-east-1" environment
+    pinecone.init(api_key=pinecone_api_key, environment="us-east-1")  
     index = pinecone.Index(pinecone_index_name)
 
     # Use Hugging Face embeddings model
@@ -104,3 +104,4 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
 
 else:
     st.warning("Please enter your API keys to proceed.")
+
