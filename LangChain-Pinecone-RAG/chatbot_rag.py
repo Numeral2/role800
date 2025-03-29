@@ -78,8 +78,16 @@ if pinecone_api_key and openai_api_key and pinecone_index_name and perplexity_ap
         perplexity_url = "https://api.perplexity.ai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {perplexity_api_key}", "Content-Type": "application/json"}
         payload = {"model": "mistral", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]}
-        response = requests.post(perplexity_url, json=payload, headers=headers)
-        result = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Error: No response from Perplexity API")
+        
+        try:
+            response = requests.post(perplexity_url, json=payload, headers=headers)
+            response.raise_for_status()
+            response_json = response.json()
+            result = response_json.get("choices", [{}])[0].get("message", {}).get("content", "Error: No response from Perplexity API")
+        except requests.exceptions.RequestException as e:
+            result = f"Error: {str(e)}"
+        except requests.exceptions.JSONDecodeError:
+            result = "Error: Invalid JSON response from Perplexity API."
 
         with st.chat_message("assistant"):
             st.markdown(result)
