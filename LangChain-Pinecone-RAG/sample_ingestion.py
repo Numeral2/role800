@@ -3,8 +3,8 @@ import time
 from dotenv import load_dotenv
 import pinecone
 from sentence_transformers import SentenceTransformer
-from langchain_pinecone import PineconeVectorStore
-from langchain_core.documents import Document
+from langchain.vectorstores import Pinecone
+from langchain.schema import Document
 
 load_dotenv()
 
@@ -28,7 +28,10 @@ index = pinecone.Index(index_name)
 
 # Initialize Hugging Face embeddings model
 embedding_model = SentenceTransformer("BAAI/bge-small-en")  # Lightweight & free
-vector_store = PineconeVectorStore(index=index, embedding=embedding_model)
+
+# Function to convert embeddings to list (serialization fix)
+def convert_to_list(embedding):
+    return embedding.tolist()  # Converts ndarray to list
 
 # Function to chunk documents
 def chunk_text(text, chunk_size=512):
@@ -54,7 +57,11 @@ documents = [
 # Generate unique ids for each chunk
 uuids = [doc.metadata["chunk_id"] for doc in documents]
 
+# Convert the document chunks to embeddings (convert to list for serialization)
+embeddings = [convert_to_list(embedding_model.encode(doc.page_content)) for doc in documents]
+
 # Add the chunks to Pinecone with minimal metadata
-vector_store.add_documents(documents=documents, ids=uuids)
+index.upsert(vectors=zip(uuids, embeddings), namespace="default")
 
 print(f"Successfully added {len(documents)} document chunks to Pinecone.")
+
