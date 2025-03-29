@@ -18,7 +18,7 @@ index_name = "quickstart"  # Change if desired
 if index_name not in pinecone.list_indexes():
     pinecone.create_index(
         name=index_name,
-        dimension=768,  # Change based on the model used (768 for small models, 1024+ for larger)
+        dimension=384,  # Change based on the model used (768 for small models, 1024+ for larger)
         metric="cosine"
     )
     while not pinecone.describe_index(index_name).status["ready"]:
