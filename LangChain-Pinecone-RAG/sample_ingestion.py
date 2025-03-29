@@ -12,7 +12,7 @@ load_dotenv()
 pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
 
 # Initialize Pinecone database
-index_name = "quickstart"  # Change if desired
+index_name = "quickstart3"  # Change if desired
 
 # Check if index exists, and create if not
 if index_name not in pinecone.list_indexes():
