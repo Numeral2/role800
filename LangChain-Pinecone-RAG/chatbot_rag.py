@@ -3,7 +3,7 @@ import streamlit as st
 import pdfplumber
 import openai
 from sentence_transformers import SentenceTransformer
-import pinecone
+from pinecone import Pinecone, ServerlessSpec
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 st.title("Chat with Your PDF (GPT-4o-mini & Hugging Face)")
@@ -30,19 +30,20 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
     st.session_state["PINECONE_INDEX_NAME"] = pinecone_index_name
     st.session_state["OPENAI_API_KEY"] = openai_api_key
 
-    # Initialize Pinecone client
-    pinecone.init(api_key=pinecone_api_key, environment="us-east-1")
-    pc = pinecone.Client()
+    # Initialize Pinecone client using the new Pinecone class
+    pc = Pinecone(api_key=pinecone_api_key)
 
-    # Create an index if not exists
-    if pinecone_index_name not in pc.list_indexes():
+    # Create an index if it doesn't exist
+    if pinecone_index_name not in pc.list_indexes().names():
         pc.create_index(
             name=pinecone_index_name,
             dimension=768,  # Dimension of the embedding model (adjust as needed)
-            metric="euclidean"
+            metric="euclidean",
+            spec=ServerlessSpec(cloud='aws', region='us-east-1')
         )
 
-    index = pc.Index(pinecone_index_name)  # Accessing the index
+    # Access the index
+    index = pc.Index(pinecone_index_name)
 
     # Use Hugging Face embeddings model
     embedding_model = SentenceTransformer("BAAI/bge-small-en")  # Free & lightweight
@@ -114,4 +115,3 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
 
 else:
     st.warning("Please enter your API keys to proceed.")
-
