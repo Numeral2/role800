@@ -78,12 +78,12 @@ if pinecone_api_key and openai_api_key and pinecone_index_name and perplexity_ap
         perplexity_url = "https://api.perplexity.ai/chat/completions"
         headers = {"Authorization": f"Bearer {perplexity_api_key}", "Content-Type": "application/json"}
         payload = {
-            "model": "sonar",
+            "model": "llama-3",
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 123,
+            "max_tokens": 500,
             "temperature": 0.2,
             "top_p": 0.9,
             "search_domain_filter": ["<any>"],
