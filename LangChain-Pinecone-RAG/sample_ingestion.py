@@ -1,6 +1,5 @@
 import os
 import time
-import streamlit as st
 from dotenv import load_dotenv
 import pinecone
 from sentence_transformers import SentenceTransformer
@@ -58,22 +57,25 @@ uuids = [doc.metadata["chunk_id"] for doc in documents]
 # Add the chunks to Pinecone with minimal metadata
 vector_store.add_documents(documents=documents, ids=uuids)
 
-# Streamlit app layout
-st.title("Chat with Your Documents")
+print(f"Successfully added {len(documents)} document chunks to Pinecone.")
 
-# User input for query
-query = st.text_input("Enter your query:")
+# ==============================
+# Query the Pinecone index
+# ==============================
 
-if query:
-    # Generate the embedding for the query
-    query_embedding = embedding_model.encode(query)  # This will give you a NumPy ndarray
-    query_embedding = query_embedding.tolist()  # Convert ndarray to list
+# Allow the user to input a query
+query = input("Enter your query: ")  # User input for the query
 
-    # Perform the query to Pinecone
-    results = index.query(query=query_embedding, top_k=3, include_metadata=True)
+# Generate the embedding for the query
+query_embedding = embedding_model.encode(query)  # This will give you a NumPy ndarray
 
-    # Display results
-    st.write("Results:")
-    for res in results['matches']:
-        st.write(f"Document ID: {res['metadata']['document_id']}, Score: {res['score']}")
-        st.write(f"Content: {res['metadata'].get('content', 'No content available')}")
+# Convert query embedding to a list (for serialization with Pinecone)
+query_embedding = query_embedding.tolist()  # Convert ndarray to list
+
+# Perform the query to Pinecone
+results = index.query(query=query_embedding, top_k=3, include_metadata=True)
+
+# Process and print the results
+print("RESULTS:")
+for res in results['matches']:
+    print(f"* {res['metadata']} | Score: {res['score']} | Content: {res['metadata'].get('document_id', 'N/A')}")
