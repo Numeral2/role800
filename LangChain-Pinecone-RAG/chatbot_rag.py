@@ -1,10 +1,11 @@
 import streamlit as st
 import os
+import pdfplumber
 from pinecone import Pinecone
 from langchain_pinecone import PineconeVectorStore
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_openai import OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from PyPDF2 import PdfReader
+import requests
 
 st.title("Chat with Your PDF")
 
@@ -12,11 +13,22 @@ st.title("Chat with Your PDF")
 pinecone_api_key = st.text_input("Enter your Pinecone API Key:", type="password")
 pinecone_index_name = st.text_input("Enter your Pinecone Index Name:")
 openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
+perplexity_api_key = st.text_input("Enter your Perplexity API Key:", type="password")
 
-if pinecone_api_key and openai_api_key and pinecone_index_name:
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            extracted_text = page.extract_text()
+            if extracted_text:
+                text += extracted_text + "\n"
+    return text
+
+if pinecone_api_key and openai_api_key and pinecone_index_name and perplexity_api_key:
     st.session_state["PINECONE_API_KEY"] = pinecone_api_key
     st.session_state["PINECONE_INDEX_NAME"] = pinecone_index_name
     st.session_state["OPENAI_API_KEY"] = openai_api_key
+    st.session_state["PERPLEXITY_API_KEY"] = perplexity_api_key
 
     # Initialize Pinecone
     pc = Pinecone(api_key=pinecone_api_key)
@@ -35,9 +47,8 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
             f.write(uploaded_file.getbuffer())
         st.success("File uploaded successfully. Processing...")
 
-        # Read PDF and extract text
-        reader = PdfReader(file_path)
-        pdf_text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+        # Extract text from PDF
+        pdf_text = extract_text_from_pdf(file_path)
 
         # Embed text into Pinecone
         vector_store.add_texts([pdf_text])
@@ -63,9 +74,12 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
         system_prompt = f"""You are an assistant for question-answering tasks. Use the following retrieved context to answer the question. If you don't know the answer, say so. Context: {docs_text}"""
         st.session_state.messages.append(SystemMessage(system_prompt))
 
-        # Invoke LLM
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=1, api_key=openai_api_key)
-        result = llm.invoke(st.session_state.messages).content
+        # Invoke Perplexity API
+        perplexity_url = "https://api.perplexity.ai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {perplexity_api_key}", "Content-Type": "application/json"}
+        payload = {"model": "mistral", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]}
+        response = requests.post(perplexity_url, json=payload, headers=headers)
+        result = response.json().get("choices", [{}])[0].get("message", {}).get("content", "Error: No response from Perplexity API")
 
         with st.chat_message("assistant"):
             st.markdown(result)
