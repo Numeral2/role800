@@ -31,6 +31,7 @@ embedding_model = SentenceTransformer("BAAI/bge-small-en")  # Lightweight & free
 
 # Function to convert embeddings to list (serialization fix)
 def convert_to_list(embedding):
+    """Converts the ndarray returned by SentenceTransformer to a Python list."""
     return embedding.tolist()  # Converts ndarray to list
 
 # Function to chunk documents
@@ -64,4 +65,3 @@ embeddings = [convert_to_list(embedding_model.encode(doc.page_content)) for doc 
 index.upsert(vectors=zip(uuids, embeddings), namespace="default")
 
 print(f"Successfully added {len(documents)} document chunks to Pinecone.")
-
