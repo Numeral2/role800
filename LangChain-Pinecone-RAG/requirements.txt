@@ -1,4 +1,4 @@
-﻿aiohappyeyeballs
+aiohappyeyeballs
 aiohttp
 aiosignal
 altair
@@ -56,7 +56,7 @@ pinecone-plugin-inference
 pinecone-plugin-interface
 pluggy
 propcache
-protobuf
+protobuf==3.20.0  # Locked protobuf version to avoid errors
 pyarrow
 pydantic
 pydantic-settings
