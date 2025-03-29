@@ -1,10 +1,11 @@
 import os
 import time
+import streamlit as st
 from dotenv import load_dotenv
 import pinecone
 from sentence_transformers import SentenceTransformer
-from langchain.vectorstores import Pinecone
-from langchain.schema import Document
+from langchain_pinecone import PineconeVectorStore
+from langchain_core.documents import Document
 
 load_dotenv()
 
@@ -28,11 +29,7 @@ index = pinecone.Index(index_name)
 
 # Initialize Hugging Face embeddings model
 embedding_model = SentenceTransformer("BAAI/bge-small-en")  # Lightweight & free
-
-# Function to convert embeddings to list (serialization fix)
-def convert_to_list(embedding):
-    """Converts the ndarray returned by SentenceTransformer to a Python list."""
-    return embedding.tolist()  # Converts ndarray to list
+vector_store = PineconeVectorStore(index=index, embedding=embedding_model)
 
 # Function to chunk documents
 def chunk_text(text, chunk_size=512):
@@ -58,10 +55,25 @@ documents = [
 # Generate unique ids for each chunk
 uuids = [doc.metadata["chunk_id"] for doc in documents]
 
-# Convert the document chunks to embeddings (convert to list for serialization)
-embeddings = [convert_to_list(embedding_model.encode(doc.page_content)) for doc in documents]
-
 # Add the chunks to Pinecone with minimal metadata
-index.upsert(vectors=zip(uuids, embeddings), namespace="default")
+vector_store.add_documents(documents=documents, ids=uuids)
 
-print(f"Successfully added {len(documents)} document chunks to Pinecone.")
+# Streamlit app layout
+st.title("Chat with Your Documents")
+
+# User input for query
+query = st.text_input("Enter your query:")
+
+if query:
+    # Generate the embedding for the query
+    query_embedding = embedding_model.encode(query)  # This will give you a NumPy ndarray
+    query_embedding = query_embedding.tolist()  # Convert ndarray to list
+
+    # Perform the query to Pinecone
+    results = index.query(query=query_embedding, top_k=3, include_metadata=True)
+
+    # Display results
+    st.write("Results:")
+    for res in results['matches']:
+        st.write(f"Document ID: {res['metadata']['document_id']}, Score: {res['score']}")
+        st.write(f"Content: {res['metadata'].get('content', 'No content available')}")
