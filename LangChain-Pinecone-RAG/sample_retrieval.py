@@ -16,7 +16,7 @@ index_name = "quickstart"
 if index_name not in pinecone.list_indexes():
     pinecone.create_index(
         name=index_name,
-        dimension=768,  # Matching Hugging Face embedding size
+        dimension=384,  # Matching Hugging Face embedding size
         metric="cosine"
     )
 
