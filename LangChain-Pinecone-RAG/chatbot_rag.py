@@ -75,9 +75,27 @@ if pinecone_api_key and openai_api_key and pinecone_index_name and perplexity_ap
         st.session_state.messages.append(SystemMessage(system_prompt))
 
         # Invoke Perplexity API
-        perplexity_url = "https://api.perplexity.ai/v1/chat/completions"
+        perplexity_url = "https://api.perplexity.ai/chat/completions"
         headers = {"Authorization": f"Bearer {perplexity_api_key}", "Content-Type": "application/json"}
-        payload = {"model": "mistral", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}]}
+        payload = {
+            "model": "sonar",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 123,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "search_domain_filter": ["<any>"],
+            "return_images": False,
+            "return_related_questions": False,
+            "top_k": 0,
+            "stream": False,
+            "presence_penalty": 0,
+            "frequency_penalty": 1,
+            "response_format": {},
+            "web_search_options": {"search_context_size": "high"}
+        }
         
         try:
             response = requests.post(perplexity_url, json=payload, headers=headers)
