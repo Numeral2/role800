@@ -52,8 +52,6 @@ packaging
 pandas
 pillow
 pinecone
-pinecone-plugin-inference
-pinecone-plugin-interface
 pluggy
 propcache
 protobuf==3.20.0  # Locked protobuf version to avoid errors
