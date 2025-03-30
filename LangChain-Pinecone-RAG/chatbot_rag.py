@@ -1,8 +1,8 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-from PyPDF2 import PdfReader
 import pinecone
+import pdfplumber
 from langchain.vectorstores import PineconeVectorStore
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.chat_models import ChatOpenAI
@@ -20,24 +20,24 @@ index_name = st.text_input("Pinecone Index Name")
 
 if pinecone_api_key and openai_api_key and index_name:
     # Initialize Pinecone
-    pinecone.init(api_key=pinecone_api_key, environment="us-east1")
+    pinecone.init(api_key=pinecone_api_key, environment="us-west1-gcp")
     index = pinecone.Index(index_name)
 
-    # Initialize embeddings model and vector store
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    # Use OpenAI's smaller embedding model (text-embedding-3-small)
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=openai_api_key)
     vector_store = PineconeVectorStore(index=index, embedding_function=embeddings)
 
     # Handle PDF upload
     uploaded_pdf = st.file_uploader("Upload a PDF", type="pdf")
     
     if uploaded_pdf:
-        # Read PDF and split into chunks
-        pdf_reader = PdfReader(uploaded_pdf)
-        chunks = []
-        for page in pdf_reader.pages:
-            text = page.extract_text()
-            if text:
-                chunks.append(text)
+        # Read PDF and split into chunks using pdfplumber
+        with pdfplumber.open(uploaded_pdf) as pdf:
+            chunks = []
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    chunks.append(text)
 
         # Store chunks as embeddings in Pinecone
         for chunk in chunks:
@@ -98,3 +98,4 @@ if pinecone_api_key and openai_api_key and index_name:
 
 else:
     st.warning("Please input your Pinecone API key, OpenAI API key, and Pinecone Index name to proceed.")
+
