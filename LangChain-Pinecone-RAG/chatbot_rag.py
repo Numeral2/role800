@@ -3,10 +3,10 @@ import streamlit as st
 import pdfplumber
 import openai
 from sentence_transformers import SentenceTransformer
-from pinecone import Pinecone, ServerlessSpec
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+import pinecone
+from pinecone import Index
 
-st.title("Chat with Your PDF (GPT-4o-mini & Hugging Face)")
+st.title("Chat with Your PDF (GPT-4o-mini & Pinecone)")
 
 # User inputs for API keys
 pinecone_api_key = st.text_input("Enter your Pinecone API Key:", type="password")
@@ -30,25 +30,24 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
     st.session_state["PINECONE_INDEX_NAME"] = pinecone_index_name
     st.session_state["OPENAI_API_KEY"] = openai_api_key
 
-    # Initialize Pinecone client using the new Pinecone class
-    pc = Pinecone(api_key=pinecone_api_key)
-
+    # Initialize Pinecone client
+    pinecone.init(api_key=pinecone_api_key, environment="us-east1-gcp")
+    
     # Create an index if it doesn't exist
-    if pinecone_index_name not in pc.list_indexes().names():
-        pc.create_index(
+    if pinecone_index_name not in pinecone.list_indexes():
+        pinecone.create_index(
             name=pinecone_index_name,
-            dimension=384,  # Dimension of the embedding model (adjust as needed)
-            metric="cosine",
-            spec=ServerlessSpec(cloud='aws', region='us-east-1')
+            dimension=512,  # Dimension of the embedding model (use appropriate dimension)
+            metric="cosine"
         )
 
     # Access the index
-    index = pc.Index(pinecone_index_name)
+    index = Index(pinecone_index_name)
 
-    # Use Hugging Face embeddings model
-    embedding_model = SentenceTransformer("BAAI/bge-small-en")  # Free & lightweight
+    # Use a SentenceTransformer model for embeddings
+    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")  # Can use other lightweight models
 
-    st.success("Pinecone and Hugging Face embeddings initialized!")
+    st.success("Pinecone and embeddings model initialized!")
 
     # File uploader
     uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
@@ -79,31 +78,29 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
     # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
-        st.session_state.messages.append(SystemMessage("You are an AI assistant."))
+        st.session_state.messages.append({"role": "system", "content": "You are an AI assistant."})
 
     # Chat input
-    prompt = st.chat_input("Ask a question about the document:")
+    prompt = st.text_input("Ask a question about the document:")
     if prompt:
         with st.chat_message("user"):
             st.markdown(prompt)
-            st.session_state.messages.append(HumanMessage(prompt))
+            st.session_state.messages.append({"role": "user", "content": prompt})
 
         # Retrieve context from Pinecone
         query_embedding = embedding_model.encode(prompt)
-        results = index.query(query=query_embedding, top_k=3, include_metadata=True)
+        results = index.query(query_embedding, top_k=3, include_metadata=True)
 
         context = "\n".join([f"Page {match['metadata']['page']}, Chunk {match['metadata']['chunk']}: {match['metadata']['content']}" for match in results['matches']])
 
         system_prompt = f"Context: {context}\n\nAnswer the user's question based on the above context."
-        st.session_state.messages.append(SystemMessage(system_prompt))
+        st.session_state.messages.append({"role": "system", "content": system_prompt})
 
-        # Invoke GPT-4o-mini
+        # Invoke GPT-4o-mini for response
+        openai.api_key = openai_api_key
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=300
         )
@@ -111,7 +108,8 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
 
         with st.chat_message("assistant"):
             st.markdown(result)
-            st.session_state.messages.append(AIMessage(result))
+            st.session_state.messages.append({"role": "assistant", "content": result})
 
 else:
     st.warning("Please enter your API keys to proceed.")
+
