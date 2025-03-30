@@ -37,8 +37,8 @@ if pinecone_api_key and openai_api_key and pinecone_index_name:
     if pinecone_index_name not in pc.list_indexes().names():
         pc.create_index(
             name=pinecone_index_name,
-            dimension=768,  # Dimension of the embedding model (adjust as needed)
-            metric="euclidean",
+            dimension=384,  # Dimension of the embedding model (adjust as needed)
+            metric="cosine",
             spec=ServerlessSpec(cloud='aws', region='us-east-1')
         )
 
