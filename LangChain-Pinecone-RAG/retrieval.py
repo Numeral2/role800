@@ -1,60 +1,51 @@
+# import basics
 import os
 from dotenv import load_dotenv
-import pinecone
-import openai
 
-# Load environment variables (Pinecone API Key, OpenAI API Key)
+# import pinecone
+import pinecone
+from pinecone import ServerlessSpec
+
+# import langchain
+from langchain.pinecone import PineconeVectorStore
+from langchain.openai import OpenAIEmbeddings
+from langchain.core.documents import Document
+
+# load environment variables
 load_dotenv()
 
-# Initialize Pinecone with the API key from environment variables
-pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
+# Initialize Pinecone
+pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+openai_api_key = os.environ.get("OPENAI_API_KEY")
+index_name = os.environ.get("PINECONE_INDEX_NAME")
 
-# Pinecone index name (replace with your actual index name)
-index_name = "your_index_name"
+# Check if required API keys and index name are set
+if not pinecone_api_key or not openai_api_key or not index_name:
+    raise ValueError("Pinecone API key, OpenAI API key, or Pinecone index name is not set!")
 
-# Initialize the Pinecone index
-index = pinecone.Index(index_name)
+# Initialize Pinecone client
+pinecone.init(api_key=pinecone_api_key, environment="us-west1-gcp")
+pc = pinecone.Index(index_name)
 
-# Set OpenAI API key
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Initialize embeddings model (using text-embedding-3-small)
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=openai_api_key)
 
-# Function to retrieve similar documents based on a query
-def retrieve(query_text, top_k=5):
-    """
-    Retrieve the top_k most relevant document chunks from Pinecone for a given query.
-    
-    :param query_text: The input query for which we want to find relevant chunks
-    :param top_k: The number of relevant chunks to retrieve
-    :return: A list of retrieval results (most relevant document chunks)
-    """
-    # Generate embeddings using OpenAI's `text-embedding-3-small` model
-    response = openai.Embedding.create(
-        model="text-embedding-3-small",
-        input=query_text
-    )
-    query_embedding = response['data'][0]['embedding']
-    
-    # Perform similarity search in Pinecone
-    results = index.query(
-        vector=query_embedding,  # The query vector (embedding)
-        top_k=top_k,  # Number of similar results to return
-        include_metadata=True  # Optionally include metadata in the results
-    )
-    
-    return results
+# Initialize vector store for Pinecone
+vector_store = PineconeVectorStore(index=pc, embedding=embeddings)
 
-# Example usage: Query the Pinecone index
-query_text = "What are the benefits of a healthy breakfast?"
-retrieved_results = retrieve(query_text)
+# Create the retriever for Pinecone-based retrieval
+retriever = vector_store.as_retriever(
+    search_type="similarity_score_threshold",
+    search_kwargs={"k": 5, "score_threshold": 0.5},
+)
 
-# Display the retrieved results
-print("Retrieved Results:")
-for res in retrieved_results['matches']:
-    # Safely retrieve the 'content' field and handle missing metadata gracefully
-    content = res['metadata'].get('content', 'No content available')
-    source = res['metadata'].get('source', 'No source available')
-    score = res.get('score', 'No score available')
-    
-    print(f"Text: {source} | Score: {score} | Content: {content}")
+# Perform a query to the retriever
+query = "what is retrieval augmented generation?"
+results = retriever.invoke(query)
+
+# Show results
+print("RESULTS:")
+for res in results:
+    print(f"* {res.page_content} [{res.metadata}]")
 
 
