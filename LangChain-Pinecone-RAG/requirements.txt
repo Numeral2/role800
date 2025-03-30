@@ -51,8 +51,6 @@ orjson
 packaging
 pandas
 pinecone
-pinecone-plugin-inference
-pinecone-plugin-interface
 pluggy
 propcache
 pydantic-settings
