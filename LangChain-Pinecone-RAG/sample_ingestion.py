@@ -70,11 +70,16 @@ documents = [Document(page_content=chunk, metadata={"source": "pdf"}) for chunk 
 # Generate unique IDs
 uuids = [f"id{i}" for i in range(1, len(documents) + 1)]
 
-# Generate embeddings for chunks
+# Convert embeddings to list of floats
 document_embeddings = [hf_model.encode(doc.page_content).tolist() for doc in documents]
 
-# Insert documents into Pinecone
+# Insert documents into Pinecone with embeddings
 vectors = list(zip(uuids, document_embeddings, [{"source": doc.metadata["source"]} for doc in documents]))
+
+# Ensure that each embedding is a list of floats
+vectors = [(id, embedding, metadata) for id, embedding, metadata in vectors if isinstance(embedding, list) and all(isinstance(e, float) for e in embedding)]
+
+# Upsert the data into Pinecone
 index.upsert(vectors)
 
 print(f"{len(documents)} PDF chunks have been successfully ingested into Pinecone!")
