@@ -1,23 +1,23 @@
 import os
 from dotenv import load_dotenv
-import pinecone
+from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
-import numpy as np
 
-# Load environment variables
+# 🔹 Load environment variables (API keys)
 load_dotenv()
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 
-# Initialize Pinecone
-pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
-index_name = "sample-index"  # The name of your Pinecone index
+# 🔹 Initialize Pinecone
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index_name = "bge-embeddings-index"  # Replace with your Pinecone index name
 
-# Initialize the Pinecone index
-index = pinecone.Index(index_name)
+# 🔹 Initialize Pinecone Index
+index = pc.Index(index_name)
 
-# Initialize the Hugging Face embedding model (BAAI/bge-small-en)
+# 🔹 Load the Hugging Face model for embeddings (BAAI/bge-small-en)
 hf_model = SentenceTransformer("BAAI/bge-small-en")
 
-# Function to retrieve similar documents
+# 🔹 Function for retrieving relevant chunks from Pinecone
 def retrieve(query_text, top_k=5):
     """
     Retrieve the top_k most relevant document chunks from Pinecone for a given query.
@@ -26,7 +26,7 @@ def retrieve(query_text, top_k=5):
     :param top_k: The number of relevant chunks to retrieve
     :return: A list of retrieval results (most relevant document chunks)
     """
-    # Encode the query into an embedding
+    # Encode the query into an embedding using the Hugging Face model
     query_embedding = hf_model.encode(query_text).tolist()  # Convert to list of floats for Pinecone
     
     # Perform similarity search in Pinecone
@@ -38,12 +38,12 @@ def retrieve(query_text, top_k=5):
     
     return results
 
-# Example usage: Query the Pinecone index
+# Example: Query the Pinecone index for relevant chunks
 query_text = "What are the benefits of a healthy breakfast?"
 retrieved_results = retrieve(query_text)
 
 # Display the retrieved results
 print("Retrieved Results:")
 for res in retrieved_results['matches']:
-    print(f"Text: {res['metadata'].get('source', 'No source info')} | Score: {res['score']} | Content: {res['metadata'].get('content', 'No content available')}")
+    print(f"Text: {res['metadata']['source']} | Score: {res['score']} | Content: {res['metadata'].get('content', 'No content available')}")
 
