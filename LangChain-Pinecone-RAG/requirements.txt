@@ -50,7 +50,7 @@ openai
 orjson
 packaging
 pandas
-pillow
+pillow==9.5.0
 pinecone
 pinecone-plugin-inference
 pinecone-plugin-interface
