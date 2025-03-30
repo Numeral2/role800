@@ -3,87 +3,53 @@ import time
 from dotenv import load_dotenv
 import pinecone
 from sentence_transformers import SentenceTransformer
-from langchain.vectorstores import Pinecone
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.schema import Document
+from langchain_pinecone import PineconeVectorStore
+from langchain_core.documents import Document
 
 # Load environment variables
 load_dotenv()
 
-# 🔹 Initialize Pinecone
-pinecone_api_key = os.getenv("PINECONE_API_KEY")
-pinecone.init(api_key=pinecone_api_key, environment="us-east-1")
+# Initialize Pinecone
+pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
 
-# 🔹 Set up Pinecone index
+# Define Pinecone index name
 index_name = "quickstart3"
 
-# Check if index exists, and create if not
+# Create index if it doesn't exist
 if index_name not in pinecone.list_indexes():
     pinecone.create_index(
         name=index_name,
-        dimension=384,  # Ensure this matches the model's embedding size
+        dimension=384,  # Change if using a different embedding model
         metric="cosine"
     )
     while not pinecone.describe_index(index_name).status["ready"]:
         time.sleep(1)
 
+# Connect to the Pinecone index
 index = pinecone.Index(index_name)
 
-# 🔹 Initialize Hugging Face Embeddings Model
+# Load the sentence transformer embedding model
 embedding_model = SentenceTransformer("BAAI/bge-small-en")
 
-# Function to properly encode text (fix ndarray serialization)
-def embed_text(text):
-    return embedding_model.encode(text, convert_to_numpy=True).tolist()
-
-# 🔹 Initialize Pinecone VectorStore
-vector_store = Pinecone(index, embed_text)
-
-# 🔹 Function to chunk text
-def chunk_text(text, chunk_size=512):
-    """Splits text into smaller chunks"""
-    return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
-
-# Example: Reading a large document (replace this with real text from a PDF)
-large_document_text = """
-    (Large document text here, this would be the content of your 20+ pages of PDF)
-    """
-
-# Chunk the document into smaller pieces
-chunks = chunk_text(large_document_text, chunk_size=512)
-
-# Create documents from chunks with minimal metadata
-documents = [
-    Document(
-        page_content=chunk,
-        metadata={"document_id": "doc1", "chunk_id": f"chunk{i+1}", "page_number": (i // 5) + 1}
-    ) for i, chunk in enumerate(chunks)
-]
-
-# Add the chunks to Pinecone
-vector_store.add_documents(documents)
-
-print(f"✅ Successfully added {len(documents)} document chunks to Pinecone.")
+# Initialize Pinecone VectorStore
+vector_store = PineconeVectorStore(index=index, embedding=embedding_model)
 
 # ==============================
-# Query the Pinecone index
+# User Query Processing
 # ==============================
 
-while True:
-    query = input("\n🔍 Enter your query (or type 'exit' to quit): ")
-    
-    if query.lower() == "exit":
-        print("👋 Exiting...")
-        break
+# Get user query input
+query = input("Enter your query: ")  # Allow user input
 
-    # Convert query into vector
-    query_vector = embed_text(query)
+# Generate embedding and convert to list for Pinecone
+query_embedding = embedding_model.encode(query).tolist()  # ✅ Fix applied
 
-    # Perform search in Pinecone
-    results = index.query(vector=query_vector, top_k=3, include_metadata=True)
+# Perform the query
+results = index.query(query=query_embedding, top_k=3, include_metadata=True)
 
-    # Display results
-    print("\n🔹 RESULTS:")
-    for res in results.get("matches", []):
-        print(f"✅ Score: {res['score']:.4f} | Content: {res['metadata'].get('document_id', 'N/A')}")
+# Display results
+print("RESULTS:")
+for res in results["matches"]:
+    print(f"* Score: {res['score']} | Content: {res['metadata'].get('document_id', 'N/A')}")
+
 
