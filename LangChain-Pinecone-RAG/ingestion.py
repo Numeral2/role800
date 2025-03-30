@@ -1,115 +1,120 @@
+# import basics
 import os
 import time
-import streamlit as st
-import openai
 from dotenv import load_dotenv
-from pinecone import Index, init
+import pinecone
 import pdfplumber
-import numpy as np
 
-# Load environment variables (Pinecone API Key, OpenAI API Key, etc.)
+# import langchain
+from langchain.pinecone import PineconeVectorStore
+from langchain_openai import OpenAIEmbeddings
+from langchain_core.documents import Document
+from langchain.text_splitters import RecursiveCharacterTextSplitter
+
 load_dotenv()
 
-# Streamlit interface setup
-st.title("Chat with Your PDF (GPT-4o-mini & Pinecone)")
+# Load API keys from environment or user input
+pinecone_api_key = os.environ.get("PINECONE_API_KEY")
+openai_api_key = os.environ.get("OPENAI_API_KEY")
+index_name = os.environ.get("PINECONE_INDEX_NAME")
 
-# User inputs for API keys and index name
-pinecone_api_key = st.text_input("Enter your Pinecone API Key:", type="password")
-pinecone_index_name = st.text_input("Enter your Pinecone Index Name:")
-openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
+# Initialize Pinecone
+pinecone.init(api_key=pinecone_api_key, environment="us-west1-gcp")
+pc = pinecone.Index(index_name)
 
-# Set OpenAI API key
-openai.api_key = openai_api_key
-
-# Function to extract text from PDF using pdfplumber and chunk it
-def extract_text_from_pdf(pdf_path, chunk_size=500):
-    text_chunks = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text()
-            if text:
-                chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-                for idx, chunk in enumerate(chunks):
-                    text_chunks.append((page_num, idx, chunk))
-    return text_chunks
-
-# Function for generating embeddings using OpenAI's `text-embedding-3-small` model
-def generate_embedding(text):
-    response = openai.Embedding.create(
-        model="text-embedding-3-small",
-        input=text
+# Check whether the index exists, and create it if not
+existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+if index_name not in existing_indexes:
+    pc.create_index(
+        name=index_name,
+        dimension=1536,  # Use the dimension of OpenAI's 'text-embedding-3-small'
+        metric="cosine",
+        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
     )
-    return response['data'][0]['embedding']
+    while not pc.describe_index(index_name).status["ready"]:
+        time.sleep(1)
 
-# Function for ingesting a PDF and inserting embeddings into Pinecone
-def ingest_pdf(uploaded_pdf_path):
-    # Extract text from PDF
-    text_chunks = extract_text_from_pdf(uploaded_pdf_path, chunk_size=500)
+index = pc.Index(index_name)
 
-    # Connect to Pinecone and initialize the index
-    init(api_key=pinecone_api_key, environment="us-east-1")
-    index = Index(pinecone_index_name)
+# Initialize embeddings model + vector store
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=openai_api_key)
+vector_store = PineconeVectorStore(index=index, embedding=embeddings)
 
-    # Generate embeddings and insert into Pinecone
-    for i, (page_num, chunk_idx, chunk) in enumerate(text_chunks):
-        vector = generate_embedding(chunk)  # Get embedding using OpenAI
-        metadata = {"page": page_num, "chunk": chunk_idx, "content": chunk}
-        
-        # Check the vector size is under 0.5 MB (500 KB max for each chunk)
-        if len(np.array(vector).tobytes()) <= 400000:
-            index.upsert(vectors=[(f"id_{i}", vector, metadata)])
+# PDF Upload and extraction using pdfplumber
+uploaded_pdf = st.file_uploader("Upload a PDF", type="pdf")
 
-    st.success("PDF processed and stored in Pinecone.")
+if uploaded_pdf:
+    # Extract text from the uploaded PDF
+    with pdfplumber.open(uploaded_pdf) as pdf:
+        raw_text = ""
+        for page in pdf.pages:
+            raw_text += page.extract_text()
 
-# Handle PDF file upload
-uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
-if uploaded_file:
-    file_path = os.path.join("uploads", uploaded_file.name)
-    os.makedirs("uploads", exist_ok=True)
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    st.success("File uploaded successfully. Processing...")
+    # Split the document into chunks
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,  # Set chunk size to ensure each chunk is under 0.5MB
+        chunk_overlap=400,
+        length_function=len,
+        is_separator_regex=False,
+    )
 
-    # Ingest the PDF into Pinecone
-    ingest_pdf(file_path)
+    # Create chunks from the extracted text
+    documents = text_splitter.split_documents([Document(page_content=raw_text)])
 
-# Initialize chat history if not already present
+    # Generate unique IDs for the chunks
+    uuids = [f"id{i}" for i in range(len(documents))]
+
+    # Add documents to Pinecone Vector Store
+    vector_store.add_documents(documents=documents, ids=uuids)
+    st.success("PDF has been successfully uploaded and stored!")
+
+# Chat functionality with the uploaded PDF
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    st.session_state.messages.append({"role": "system", "content": "You are an AI assistant."})
+    st.session_state.messages.append(SystemMessage("You are an assistant for question-answering tasks."))
 
-# Handle user input for asking questions about the document
-prompt = st.text_input("Ask a question about the document:")
+# Display previous messages
+for message in st.session_state.messages:
+    if isinstance(message, HumanMessage):
+        with st.chat_message("user"):
+            st.markdown(message.content)
+    elif isinstance(message, AIMessage):
+        with st.chat_message("assistant"):
+            st.markdown(message.content)
+
+# Chat input
+prompt = st.chat_input("Ask a question about the PDF")
+
 if prompt:
+    # Add the prompt to the chat history
     with st.chat_message("user"):
         st.markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.messages.append(HumanMessage(prompt))
 
-    # Retrieve context from Pinecone based on the user's query
-    query_embedding = generate_embedding(prompt)  # Get embedding using OpenAI
-    init(api_key=pinecone_api_key, environment="us-east-1")
-    index = Index(pinecone_index_name)
-    
-    results = index.query(query_embedding, top_k=3, include_metadata=True)
+    # Create retriever for Pinecone-based retrieval
+    retriever = vector_store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 3, "score_threshold": 0.5})
+    docs = retriever.invoke(prompt)
+    docs_text = "".join([d.page_content for d in docs])
 
-    context = "\n".join([f"Page {match['metadata']['page']}, Chunk {match['metadata']['chunk']}: {match['metadata']['content']}" for match in results['matches']])
+    # Create the system prompt for the assistant
+    system_prompt = f"""
+    You are an assistant for question-answering tasks. 
+    Use the following pieces of retrieved context to answer the question. 
+    If you don't know the answer, just say that you don't know. 
+    Context: {docs_text}
+    """
 
-    system_prompt = f"Context: {context}\n\nAnswer the user's question based on the above context."
-    st.session_state.messages.append({"role": "system", "content": system_prompt})
+    # Add the system prompt to the message history
+    st.session_state.messages.append(SystemMessage(system_prompt))
 
-    # Invoke GPT-4o-mini for response
-    openai.api_key = openai_api_key
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=300
-    )
-    result = response["choices"][0]["message"]["content"]
+    # Initialize GPT-4o-mini model
+    llm = ChatOpenAI(model="gpt-4o-mini", api_key=openai_api_key)
 
+    # Invoke the model with the chat history
+    result = llm.invoke(st.session_state.messages).content
+
+    # Display the assistant's response
     with st.chat_message("assistant"):
         st.markdown(result)
-        st.session_state.messages.append({"role": "assistant", "content": result})
+        st.session_state.messages.append(AIMessage(result))
 
-else:
-    st.warning("Please enter your API keys to proceed.")
