@@ -32,6 +32,7 @@ jsonschema-specifications
 langchain
 langchain-community
 langchain-core
+langchain-openai
 langchain-pinecone
 langchain-tests
 langchain-text-splitters
@@ -45,6 +46,7 @@ multidict
 mypy-extensions
 narwhals
 numpy
+openai
 orjson
 packaging
 pandas
@@ -54,7 +56,7 @@ pinecone-plugin-inference
 pinecone-plugin-interface
 pluggy
 propcache
-protobuf==3.20.0  # Locked protobuf version to avoid errors
+protobuf
 pyarrow
 pydantic
 pydantic-settings
@@ -94,24 +96,4 @@ urllib3
 watchdog
 yarl
 zstandard
-pypdf2
-cffi
-cryptography
 pdfplumber
-pycparser
-pypdfium2
-mpmath
-threadpoolctl
-sympy
-setuptools
-scipy
-safetensors
-networkx
-joblib
-fsspec
-filelock
-torch
-scikit-learn
-tokenizers
-faiss-cpu  # Add FAISS for efficient similarity search
-
