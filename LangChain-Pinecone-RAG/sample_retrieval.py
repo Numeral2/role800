@@ -45,6 +45,5 @@ retrieved_results = retrieve(query_text)
 # Display the retrieved results
 print("Retrieved Results:")
 for res in retrieved_results['matches']:
-    print(f"Text: {res['metadata']['source']} | Score: {res['score']} | Content: {res['metadata'].get('content', 'No content available')}")
-
+    print(f"Text: {res['metadata'].get('source', 'No source info')} | Score: {res['score']} | Content: {res['metadata'].get('content', 'No content available')}")
 
