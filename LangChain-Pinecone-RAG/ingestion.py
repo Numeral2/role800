@@ -4,30 +4,23 @@ import streamlit as st
 import openai
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
-from pinecone import Index
+from pinecone import Index, init
 import pdfplumber
-from langchain.document_loaders import PyPDFLoader
-from langchain.text_splitters import RecursiveCharacterTextSplitter
+import numpy as np
 
 # Load environment variables (Pinecone API Key, OpenAI API Key, etc.)
 load_dotenv()
 
-# Initialize Pinecone with your API Key
-pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
-
-# Initialize the Pinecone index
-index_name = "your_index_name"  # Set your Pinecone index name
-index = Index(index_name)
-
-# Initialize the Hugging Face embedding model (all-MiniLM-L6-v2)
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")  # Using all-MiniLM-L6-v2
-
+# Streamlit interface setup
 st.title("Chat with Your PDF (GPT-4o-mini & Pinecone)")
 
-# User inputs for API keys
+# User inputs for API keys and index name
 pinecone_api_key = st.text_input("Enter your Pinecone API Key:", type="password")
 pinecone_index_name = st.text_input("Enter your Pinecone Index Name:")
 openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
+
+# Initialize the embedding model for 'text-embedding-3-small'
+embedding_model = SentenceTransformer("text-embedding-3-small")
 
 # Function to extract text from PDF using pdfplumber and chunk it
 def extract_text_from_pdf(pdf_path, chunk_size=500):
@@ -41,30 +34,27 @@ def extract_text_from_pdf(pdf_path, chunk_size=500):
                     text_chunks.append((page_num, idx, chunk))
     return text_chunks
 
-# Function for Ingesting a PDF and inserting embeddings into Pinecone
+# Function for ingesting a PDF and inserting embeddings into Pinecone
 def ingest_pdf(uploaded_pdf_path):
-    # Load the PDF document
-    loader = PyPDFLoader(uploaded_pdf_path)
-    raw_documents = loader.load()
+    # Extract text from PDF
+    text_chunks = extract_text_from_pdf(uploaded_pdf_path, chunk_size=500)
 
-    # Split the document into chunks of text
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,  # Adjust chunk size
-        chunk_overlap=400,  # Adjust chunk overlap
-        length_function=len,
-    )
-    documents = text_splitter.split_documents(raw_documents)
+    # Connect to Pinecone and initialize the index
+    init(api_key=pinecone_api_key, environment="us-east-1")
+    index = Index(pinecone_index_name)
 
-    # Generate embeddings for each document chunk
-    for i, doc in enumerate(documents):
-        vector = embedding_model.encode(doc["text"]).tolist()  # Convert NumPy array to list
-        metadata = {"source": uploaded_pdf_path, "content": doc["text"]}
-        # Insert into Pinecone
-        index.upsert(vectors=[(f"id_{i}", vector, metadata)])
+    # Generate embeddings and insert into Pinecone
+    for i, (page_num, chunk_idx, chunk) in enumerate(text_chunks):
+        vector = embedding_model.encode(chunk).tolist()  # Convert NumPy array to list
+        metadata = {"page": page_num, "chunk": chunk_idx, "content": chunk}
+        
+        # Check the vector size is under 0.5 MB (500 KB max for each chunk)
+        if len(np.array(vector).tobytes()) <= 400000:
+            index.upsert(vectors=[(f"id_{i}", vector, metadata)])
 
-    st.success("File processed and stored in Pinecone.")
+    st.success("PDF processed and stored in Pinecone.")
 
-# User uploads PDF
+# Handle PDF file upload
 uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
 if uploaded_file:
     file_path = os.path.join("uploads", uploaded_file.name)
@@ -76,20 +66,23 @@ if uploaded_file:
     # Ingest the PDF into Pinecone
     ingest_pdf(file_path)
 
-# Initialize chat history
+# Initialize chat history if not already present
 if "messages" not in st.session_state:
     st.session_state.messages = []
     st.session_state.messages.append({"role": "system", "content": "You are an AI assistant."})
 
-# Chat input
+# Handle user input for asking questions about the document
 prompt = st.text_input("Ask a question about the document:")
 if prompt:
     with st.chat_message("user"):
         st.markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Retrieve context from Pinecone
+    # Retrieve context from Pinecone based on the user's query
     query_embedding = embedding_model.encode(prompt)
+    init(api_key=pinecone_api_key, environment="us-east-1")
+    index = Index(pinecone_index_name)
+    
     results = index.query(query_embedding, top_k=3, include_metadata=True)
 
     context = "\n".join([f"Page {match['metadata']['page']}, Chunk {match['metadata']['chunk']}: {match['metadata']['content']}" for match in results['matches']])
@@ -113,3 +106,4 @@ if prompt:
 
 else:
     st.warning("Please enter your API keys to proceed.")
+
