@@ -1,55 +1,36 @@
 import os
-import time
 from dotenv import load_dotenv
-import pinecone
+from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
-from langchain_pinecone import PineconeVectorStore
-from langchain_core.documents import Document
 
-# Load environment variables
+# 🔹 Load API keys
 load_dotenv()
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 
-# Initialize Pinecone
-pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
+# 🔹 Initialize Pinecone
+pc = Pinecone(api_key=PINECONE_API_KEY)
+index_name = "bge-embeddings-index"
 
-# Define Pinecone index name
-index_name = "quickstart3"
+# 🔹 Connect to the Pinecone index
+index = pc.Index(index_name)
 
-# Create index if it doesn't exist
-if index_name not in pinecone.list_indexes():
-    pinecone.create_index(
-        name=index_name,
-        dimension=384,  # Change if using a different embedding model
-        metric="cosine"
-    )
-    while not pinecone.describe_index(index_name).status["ready"]:
-        time.sleep(1)
+# 🔹 Load BAAI embedding model
+hf_model = SentenceTransformer("BAAI/bge-small-en")
 
-# Connect to the Pinecone index
-index = pinecone.Index(index_name)
+# 🔹 Query function
+def query_pinecone(query, top_k=3):
+    query_embedding = hf_model.encode(query).tolist()  # Convert query to embedding
+    results = index.query(vector=query_embedding, top_k=top_k, include_metadata=True)
 
-# Load the sentence transformer embedding model
-embedding_model = SentenceTransformer("BAAI/bge-small-en")
+    # Print the results
+    if results.get("matches"):
+        print("### Relevant Results:")
+        for match in results["matches"]:
+            print(f"- {match['metadata']['source']}: {match['score']:.2f} | {match['metadata']}")
+    else:
+        print("No matching documents found.")
 
-# Initialize Pinecone VectorStore
-vector_store = PineconeVectorStore(index=index, embedding=embedding_model)
-
-# ==============================
-# User Query Processing
-# ==============================
-
-# Get user query input
-query = input("Enter your query: ")  # Allow user input
-
-# Generate embedding and convert to list for Pinecone
-query_embedding = embedding_model.encode(query).tolist()  # ✅ Fix applied
-
-# Perform the query
-results = index.query(query=query_embedding, top_k=3, include_metadata=True)
-
-# Display results
-print("RESULTS:")
-for res in results["matches"]:
-    print(f"* Score: {res['score']} | Content: {res['metadata'].get('document_id', 'N/A')}")
-
+# ========== 🔹 Example Query ==========
+query = "What did you have for breakfast?"
+query_pinecone(query)
 
