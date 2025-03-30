@@ -1,13 +1,12 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-import faiss
 import pdfplumber
-import numpy as np
-from langchain.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from langchain.chat_models import ChatOpenAI
-from langchain.chains import ConversationalRetrievalChain
-from langchain.prompts import SystemMessage, HumanMessage, AIMessage
+from langchain_pinecone import PineconeVectorStore
+from pinecone import Pinecone, ServerlessSpec
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 load_dotenv()
 
@@ -15,99 +14,72 @@ st.title("Chat with Your PDF")
 
 # Input keys
 openai_api_key = st.text_input("OpenAI API Key", type="password")
+pinecone_api_key = st.text_input("Pinecone API Key", type="password")
+pinecone_index_name = st.text_input("Pinecone Index Name")
 
-if openai_api_key:
-    # Initialize the OpenAI embedding model (text-embedding-3-small)
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=openai_api_key)
+def initialize_pinecone():
+    pc = Pinecone(api_key=pinecone_api_key)
+    existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+    
+    if pinecone_index_name not in existing_indexes:
+        pc.create_index(
+            name=pinecone_index_name,
+            dimension=1536,  # text-embedding-3-small
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+        )
+        
+    return PineconeVectorStore(index=pc.Index(pinecone_index_name), embedding=embeddings)
 
-    # Initialize FAISS index
-    dimension = 1536  # Dimension of embeddings for 'text-embedding-3-small'
-    index = faiss.IndexFlatL2(dimension)  # Using L2 (Euclidean) distance for similarity search
-
-    # Handle PDF upload
+if openai_api_key and pinecone_api_key and pinecone_index_name:
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=openai_api_key)
+    vector_store = initialize_pinecone()
+    
     uploaded_pdf = st.file_uploader("Upload a PDF", type="pdf")
-
+    
     if uploaded_pdf:
-        # Read PDF and split into chunks using pdfplumber
         with pdfplumber.open(uploaded_pdf) as pdf:
             chunks = []
             for page in pdf.pages:
                 text = page.extract_text()
                 if text:
                     chunks.append(text)
-
-        # Generate embeddings for each chunk and add to FAISS index
-        embeddings_list = []
-        for chunk in chunks:
-            embedding = embeddings.embed_text(chunk)
-            embeddings_list.append(embedding)
-
-        # Convert embeddings list to numpy array and add to FAISS index
-        embeddings_array = np.array(embeddings_list).astype(np.float32)
-        index.add(embeddings_array)
-
-        st.success("PDF successfully uploaded and stored in FAISS!")
-
-    # Initialize chat history
+        
+        documents = [HumanMessage(content=chunk) for chunk in chunks]
+        vector_store.add_documents(documents)
+        st.success("PDF successfully uploaded and stored in Pinecone!")
+    
     if "messages" not in st.session_state:
-        st.session_state.messages = []
-        st.session_state.messages.append(SystemMessage("You are an assistant for question-answering tasks."))
-
-    # Display chat history
+        st.session_state.messages = [SystemMessage(content="You are an assistant for question-answering tasks.")]
+    
     for message in st.session_state.messages:
-        if isinstance(message, HumanMessage):
-            with st.chat_message("user"):
-                st.markdown(message.content)
-        elif isinstance(message, AIMessage):
-            with st.chat_message("assistant"):
-                st.markdown(message.content)
-
-    # Create a prompt for the user
+        with st.chat_message("assistant" if isinstance(message, AIMessage) else "user"):
+            st.markdown(message.content)
+    
     prompt = st.chat_input("Ask a question about the PDF")
-
-    # Did the user submit a prompt?
+    
     if prompt:
-        # Add the user message to the history
         with st.chat_message("user"):
             st.markdown(prompt)
-            st.session_state.messages.append(HumanMessage(prompt))
-
-        # Generate embedding for the user's prompt
-        query_embedding = embeddings.embed_text(prompt)
-
-        # Search the FAISS index for the most similar document chunks
-        query_embedding = np.array(query_embedding).astype(np.float32)
-        distances, indices = index.search(query_embedding.reshape(1, -1), k=3)
-
-        # Retrieve the relevant chunks
-        docs = []
-        for idx in indices[0]:
-            docs.append(chunks[idx])
-
-        docs_text = "".join(docs)
-
-        # Create the system prompt for the assistant
+            st.session_state.messages.append(HumanMessage(content=prompt))
+        
+        retriever = vector_store.as_retriever()
+        docs = retriever.invoke(prompt)
+        context = "\n".join([doc.page_content for doc in docs])
+        
         system_prompt = f"""
-        You are an assistant for question-answering tasks. 
-        Use the following pieces of retrieved context to answer the question. 
-        If you don't know the answer, just say that you don't know. 
-        Context: {docs_text}
+        You are an assistant for question-answering tasks.
+        Use the following retrieved context to answer the question.
+        If you don't know the answer, just say that you don't know.
+        Context: {context}
         """
-
-        # Add system prompt to message history
-        st.session_state.messages.append(SystemMessage(system_prompt))
-
-        # Initialize GPT-4o-mini model
+        
+        st.session_state.messages.append(SystemMessage(content=system_prompt))
         llm = ChatOpenAI(model="gpt-4o-mini", api_key=openai_api_key)
-
-        # Invoke the model with the message history
         result = llm.invoke(st.session_state.messages).content
-
-        # Display the assistant's response
+        
         with st.chat_message("assistant"):
             st.markdown(result)
-            st.session_state.messages.append(AIMessage(result))
-
+            st.session_state.messages.append(AIMessage(content=result))
 else:
-    st.warning("Please input your OpenAI API key to proceed.")
-
+    st.warning("Please input all required API keys and index name to proceed.")
