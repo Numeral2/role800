@@ -1,85 +1,122 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-import pdfplumber
-from langchain_openai import OpenAIEmbeddings
+import pdfplumber  # For extracting text from PDF
+import numpy as np
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.vectorstores import PineconeVectorStore
+from langchain.chains import LLMChain
 from langchain.chat_models import ChatOpenAI
-from langchain_pinecone import PineconeVectorStore
 from pinecone import Pinecone, ServerlessSpec
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from pinecone.core import Vector
 
 load_dotenv()
 
-st.title("Chat with Your PDF")
+st.title("Chatbot with PDF Upload")
 
-# Input keys
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-pinecone_api_key = st.text_input("Pinecone API Key", type="password")
-pinecone_index_name = st.text_input("Pinecone Index Name")
+# initialize pinecone database
+pc = Pinecone(api_key=os.environ.get("PINECONE_API_KEY"))
+index_name = os.environ.get("PINECONE_INDEX_NAME")  # change if desired
+index = pc.Index(index_name)
 
-def initialize_pinecone():
-    pc = Pinecone(api_key=pinecone_api_key)
-    existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
-    
-    if pinecone_index_name not in existing_indexes:
-        pc.create_index(
-            name=pinecone_index_name,
-            dimension=1536,  # text-embedding-3-small
-            metric="cosine",
-            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
-        )
-        
-    return PineconeVectorStore(index=pc.Index(pinecone_index_name), embedding=embeddings)
+# initialize embeddings model + vector store
+embeddings = OpenAIEmbeddings(model="text-embedding-3-large", api_key=os.environ.get("OPENAI_API_KEY"))
+vector_store = PineconeVectorStore(index=index, embedding=embeddings)
 
-if openai_api_key and pinecone_api_key and pinecone_index_name:
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small", api_key=openai_api_key)
-    vector_store = initialize_pinecone()
+# helper function to chunk text into smaller parts
+def chunk_text(text, max_size=40000):
+    chunks = []
+    current_chunk = ""
     
-    uploaded_pdf = st.file_uploader("Upload a PDF", type="pdf")
+    # Split the text into smaller chunks to keep the size under the limit
+    for line in text.split("\n"):
+        if len(current_chunk) + len(line) <= max_size:
+            current_chunk += line + "\n"
+        else:
+            chunks.append(current_chunk.strip())
+            current_chunk = line + "\n"
     
-    if uploaded_pdf:
-        with pdfplumber.open(uploaded_pdf) as pdf:
-            chunks = []
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    chunks.append(text)
-        
-        documents = [HumanMessage(content=chunk) for chunk in chunks]
-        vector_store.add_documents(documents)
-        st.success("PDF successfully uploaded and stored in Pinecone!")
+    if current_chunk:
+        chunks.append(current_chunk.strip())  # Append any remaining content
     
-    if "messages" not in st.session_state:
-        st.session_state.messages = [SystemMessage(content="You are an assistant for question-answering tasks.")]
-    
-    for message in st.session_state.messages:
-        with st.chat_message("assistant" if isinstance(message, AIMessage) else "user"):
-            st.markdown(message.content)
-    
-    prompt = st.chat_input("Ask a question about the PDF")
-    
-    if prompt:
+    return chunks
+
+# handle file upload
+uploaded_file = st.file_uploader("Upload your PDF", type=["pdf"])
+
+if uploaded_file:
+    # Read the uploaded PDF using pdfplumber
+    with pdfplumber.open(uploaded_file) as pdf:
+        text = ""
+        for page in pdf.pages:
+            text += page.extract_text()
+
+    # Chunk the extracted text
+    chunks = chunk_text(text)
+
+    # Store each chunk in Pinecone
+    for i, chunk in enumerate(chunks):
+        embedding = embeddings.embed(chunk)
+        vector = Vector(id=str(i), values=embedding)
+        index.upsert([vector])  # Insert into Pinecone
+
+    st.success("PDF has been processed and stored in Pinecone.")
+
+# initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+    st.session_state.messages.append(SystemMessage("You are an assistant for question-answering tasks."))
+
+# display chat messages from history on app rerun
+for message in st.session_state.messages:
+    if isinstance(message, HumanMessage):
         with st.chat_message("user"):
-            st.markdown(prompt)
-            st.session_state.messages.append(HumanMessage(content=prompt))
-        
-        retriever = vector_store.as_retriever()
-        docs = retriever.invoke(prompt)
-        context = "\n".join([doc.page_content for doc in docs])
-        
-        system_prompt = f"""
-        You are an assistant for question-answering tasks.
-        Use the following retrieved context to answer the question.
-        If you don't know the answer, just say that you don't know.
-        Context: {context}
-        """
-        
-        st.session_state.messages.append(SystemMessage(content=system_prompt))
-        llm = ChatOpenAI(model="gpt-4o-mini", api_key=openai_api_key)
-        result = llm.invoke(st.session_state.messages).content
-        
+            st.markdown(message.content)
+    elif isinstance(message, AIMessage):
         with st.chat_message("assistant"):
-            st.markdown(result)
-            st.session_state.messages.append(AIMessage(content=result))
-else:
-    st.warning("Please input all required API keys and index name to proceed.")
+            st.markdown(message.content)
+
+# create the bar where we can type messages
+prompt = st.chat_input("Ask me something")
+
+# did the user submit a prompt?
+if prompt:
+    with st.chat_message("user"):
+        st.markdown(prompt)
+        st.session_state.messages.append(HumanMessage(prompt))
+
+    # initialize the llm
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=1
+    )
+
+    # creating and invoking the retriever
+    retriever = vector_store.as_retriever(
+        search_type="similarity_score_threshold",
+        search_kwargs={"k": 3, "score_threshold": 0.5},
+    )
+
+    docs = retriever.invoke(prompt)
+    docs_text = "".join(d.page_content for d in docs)
+
+    # creating the system prompt
+    system_prompt = """You are an assistant for question-answering tasks. 
+    Use the following pieces of retrieved context to answer the question. 
+    If you don't know the answer, just say that you don't know. 
+    Use three sentences maximum and keep the answer concise.
+    Context: {context}:"""
+
+    # Populate the system prompt with the retrieved context
+    system_prompt_fmt = system_prompt.format(context=docs_text)
+
+    # adding the system prompt to the message history
+    st.session_state.messages.append(SystemMessage(system_prompt_fmt))
+
+    # invoking the llm
+    result = llm.invoke(st.session_state.messages).content
+
+    # adding the response from the llm to the screen (and chat)
+    with st.chat_message("assistant"):
+        st.markdown(result)
+        st.session_state.messages.append(AIMessage(result))
