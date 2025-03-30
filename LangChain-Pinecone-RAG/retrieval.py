@@ -13,8 +13,8 @@ index_name = "your_index_name"  # The name of your Pinecone index
 # Initialize the Pinecone index
 index = pinecone.Index(index_name)
 
-# Initialize the Hugging Face embedding model (BAAI/bge-small-en)
-hf_model = SentenceTransformer("BAAI/bge-small-en")
+# Initialize the Hugging Face embedding model (all-MiniLM-L6-v2)
+hf_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # Function to retrieve similar documents based on a query
 def retrieve(query_text, top_k=5):
@@ -44,5 +44,6 @@ retrieved_results = retrieve(query_text)
 # Display the retrieved results
 print("Retrieved Results:")
 for res in retrieved_results['matches']:
-    print(f"Text: {res['metadata']['source']} | Score: {res['score']} | Content: {res['metadata'].get('content', 'No content available')}")
-
+    # Safely retrieve the 'content' field and handle missing metadata gracefully
+    content = res['metadata'].get('content', 'No content available')
+    print(f"Text: {res['metadata'].get('source', 'No source available')} | Score: {res['score']} | Content: {content}")
