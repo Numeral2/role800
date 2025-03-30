@@ -1,36 +1,50 @@
 import os
 from dotenv import load_dotenv
-from pinecone import Pinecone
+import pinecone
 from sentence_transformers import SentenceTransformer
+import numpy as np
 
-# 🔹 Load API keys
+# Load environment variables
 load_dotenv()
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 
-# 🔹 Initialize Pinecone
-pc = Pinecone(api_key=PINECONE_API_KEY)
-index_name = "bge-embeddings-index"
+# Initialize Pinecone
+pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
+index_name = "sample-index"  # The name of your Pinecone index
 
-# 🔹 Connect to the Pinecone index
-index = pc.Index(index_name)
+# Initialize the Pinecone index
+index = pinecone.Index(index_name)
 
-# 🔹 Load BAAI embedding model
+# Initialize the Hugging Face embedding model (BAAI/bge-small-en)
 hf_model = SentenceTransformer("BAAI/bge-small-en")
 
-# 🔹 Query function
-def query_pinecone(query, top_k=3):
-    query_embedding = hf_model.encode(query).tolist()  # Convert query to embedding
-    results = index.query(vector=query_embedding, top_k=top_k, include_metadata=True)
+# Function to retrieve similar documents
+def retrieve(query_text, top_k=5):
+    """
+    Retrieve the top_k most relevant document chunks from Pinecone for a given query.
+    
+    :param query_text: The input query for which we want to find relevant chunks
+    :param top_k: The number of relevant chunks to retrieve
+    :return: A list of retrieval results (most relevant document chunks)
+    """
+    # Encode the query into an embedding
+    query_embedding = hf_model.encode(query_text).tolist()  # Convert to list of floats for Pinecone
+    
+    # Perform similarity search in Pinecone
+    results = index.query(
+        vector=query_embedding,  # The query vector (embedding)
+        top_k=top_k,  # Number of similar results to return
+        include_metadata=True  # Optionally include metadata in the results
+    )
+    
+    return results
 
-    # Print the results
-    if results.get("matches"):
-        print("### Relevant Results:")
-        for match in results["matches"]:
-            print(f"- {match['metadata']['source']}: {match['score']:.2f} | {match['metadata']}")
-    else:
-        print("No matching documents found.")
+# Example usage: Query the Pinecone index
+query_text = "What are the benefits of a healthy breakfast?"
+retrieved_results = retrieve(query_text)
 
-# ========== 🔹 Example Query ==========
-query = "What did you have for breakfast?"
-query_pinecone(query)
+# Display the retrieved results
+print("Retrieved Results:")
+for res in retrieved_results['matches']:
+    print(f"Text: {res['metadata']['source']} | Score: {res['score']} | Content: {res['metadata'].get('content', 'No content available')}")
+
 
