@@ -6,15 +6,17 @@ from sentence_transformers import SentenceTransformer
 # Load environment variables
 load_dotenv()
 
-# Initialize Pinecone
+# Initialize Pinecone with the API key from environment variables
 pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
-index_name = "your_index_name"  # The name of your Pinecone index
+
+# Pinecone index name (replace with your actual index name)
+index_name = "your_index_name"
 
 # Initialize the Pinecone index
 index = pinecone.Index(index_name)
 
-# Initialize the Hugging Face embedding model (all-MiniLM-L6-v2)
-hf_model = SentenceTransformer("all-MiniLM-L6-v2")
+# Initialize the Hugging Face embedding model (text-embedding-3-small)
+hf_model = SentenceTransformer("text-embedding-3-small")
 
 # Function to retrieve similar documents based on a query
 def retrieve(query_text, top_k=5):
@@ -46,4 +48,8 @@ print("Retrieved Results:")
 for res in retrieved_results['matches']:
     # Safely retrieve the 'content' field and handle missing metadata gracefully
     content = res['metadata'].get('content', 'No content available')
-    print(f"Text: {res['metadata'].get('source', 'No source available')} | Score: {res['score']} | Content: {content}")
+    source = res['metadata'].get('source', 'No source available')
+    score = res.get('score', 'No score available')
+    
+    print(f"Text: {source} | Score: {score} | Content: {content}")
+
