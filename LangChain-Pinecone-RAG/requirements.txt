@@ -56,7 +56,7 @@ pinecone-plugin-inference
 pinecone-plugin-interface
 pluggy
 propcache
-protobuf==3.20.0.
+protobuf==3.19.0.
 pyarrow
 pydantic
 pydantic-settings
