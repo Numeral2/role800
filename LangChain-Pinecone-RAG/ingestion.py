@@ -3,7 +3,6 @@ import time
 import streamlit as st
 import openai
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
 from pinecone import Index, init
 import pdfplumber
 import numpy as np
@@ -19,8 +18,8 @@ pinecone_api_key = st.text_input("Enter your Pinecone API Key:", type="password"
 pinecone_index_name = st.text_input("Enter your Pinecone Index Name:")
 openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
 
-# Initialize the embedding model for 'text-embedding-3-small'
-embedding_model = SentenceTransformer("text-embedding-3-small")
+# Set OpenAI API key
+openai.api_key = openai_api_key
 
 # Function to extract text from PDF using pdfplumber and chunk it
 def extract_text_from_pdf(pdf_path, chunk_size=500):
@@ -34,6 +33,14 @@ def extract_text_from_pdf(pdf_path, chunk_size=500):
                     text_chunks.append((page_num, idx, chunk))
     return text_chunks
 
+# Function for generating embeddings using OpenAI's `text-embedding-3-small` model
+def generate_embedding(text):
+    response = openai.Embedding.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return response['data'][0]['embedding']
+
 # Function for ingesting a PDF and inserting embeddings into Pinecone
 def ingest_pdf(uploaded_pdf_path):
     # Extract text from PDF
@@ -45,7 +52,7 @@ def ingest_pdf(uploaded_pdf_path):
 
     # Generate embeddings and insert into Pinecone
     for i, (page_num, chunk_idx, chunk) in enumerate(text_chunks):
-        vector = embedding_model.encode(chunk).tolist()  # Convert NumPy array to list
+        vector = generate_embedding(chunk)  # Get embedding using OpenAI
         metadata = {"page": page_num, "chunk": chunk_idx, "content": chunk}
         
         # Check the vector size is under 0.5 MB (500 KB max for each chunk)
@@ -79,7 +86,7 @@ if prompt:
         st.session_state.messages.append({"role": "user", "content": prompt})
 
     # Retrieve context from Pinecone based on the user's query
-    query_embedding = embedding_model.encode(prompt)
+    query_embedding = generate_embedding(prompt)  # Get embedding using OpenAI
     init(api_key=pinecone_api_key, environment="us-east-1")
     index = Index(pinecone_index_name)
     
@@ -106,4 +113,3 @@ if prompt:
 
 else:
     st.warning("Please enter your API keys to proceed.")
-
