@@ -1,52 +1,48 @@
 import os
-import streamlit as st
+from dotenv import load_dotenv
 import pinecone
 from sentence_transformers import SentenceTransformer
-from langchain_pinecone import PineconeVectorStore
 
-def retrieve_data(pinecone_api_key, pinecone_index_name, query):
-    # Initialize Pinecone
-    pinecone.init(api_key=pinecone_api_key, environment="us-east-1")
-    index = pinecone.Index(pinecone_index_name)
+# Load environment variables
+load_dotenv()
 
-    # Initialize Hugging Face Embeddings Model
-    embedding_model = SentenceTransformer("BAAI/bge-small-en")  # Free & lightweight
-    vector_store = PineconeVectorStore(index=index, embedding=embedding_model)
+# Initialize Pinecone
+pinecone.init(api_key=os.getenv("PINECONE_API_KEY"), environment="us-east-1")
+index_name = "your_index_name"  # The name of your Pinecone index
 
-    # Retrieval
-    retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+# Initialize the Pinecone index
+index = pinecone.Index(index_name)
+
+# Initialize the Hugging Face embedding model (BAAI/bge-small-en)
+hf_model = SentenceTransformer("BAAI/bge-small-en")
+
+# Function to retrieve similar documents based on a query
+def retrieve(query_text, top_k=5):
+    """
+    Retrieve the top_k most relevant document chunks from Pinecone for a given query.
     
-    # Perform the retrieval
-    try:
-        results = retriever.invoke(query)  # Correct method for retrieval
-    except Exception as e:
-        raise Exception(f"An error occurred while retrieving results: {e}")
+    :param query_text: The input query for which we want to find relevant chunks
+    :param top_k: The number of relevant chunks to retrieve
+    :return: A list of retrieval results (most relevant document chunks)
+    """
+    # Encode the query into an embedding
+    query_embedding = hf_model.encode(query_text).tolist()  # Convert to list of floats for Pinecone
+    
+    # Perform similarity search in Pinecone
+    results = index.query(
+        vector=query_embedding,  # The query vector (embedding)
+        top_k=top_k,  # Number of similar results to return
+        include_metadata=True  # Optionally include metadata in the results
+    )
     
     return results
 
-# Streamlit UI
-st.title("Retrieve Information from Your PDF")
+# Example usage: Query the Pinecone index
+query_text = "What are the benefits of a healthy breakfast?"
+retrieved_results = retrieve(query_text)
 
-# User inputs for API keys
-pinecone_api_key = st.text_input("Enter your Pinecone API Key:", type="password")
-pinecone_index_name = st.text_input("Enter your Pinecone Index Name:")
-query = st.text_input("Enter your query:", "")
-
-if pinecone_api_key and pinecone_index_name and query:
-    try:
-        results = retrieve_data(pinecone_api_key, pinecone_index_name, query)
-
-        # Display results
-        st.subheader("Results:")
-        if results:
-            for i, res in enumerate(results):
-                st.markdown(f"**Result {i + 1}:**")
-                st.markdown(f"**Content:** {res.page_content}")
-                st.markdown(f"**Metadata:** {res.metadata}")
-        else:
-            st.warning("No relevant results found.")
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
-else:
-    st.warning("Please enter all required fields to proceed.")
+# Display the retrieved results
+print("Retrieved Results:")
+for res in retrieved_results['matches']:
+    print(f"Text: {res['metadata']['source']} | Score: {res['score']} | Content: {res['metadata'].get('content', 'No content available')}")
 
