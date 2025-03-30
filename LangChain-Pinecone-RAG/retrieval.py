@@ -1,9 +1,9 @@
 import os
 from dotenv import load_dotenv
 import pinecone
-from sentence_transformers import SentenceTransformer
+import openai
 
-# Load environment variables
+# Load environment variables (Pinecone API Key, OpenAI API Key)
 load_dotenv()
 
 # Initialize Pinecone with the API key from environment variables
@@ -15,8 +15,8 @@ index_name = "your_index_name"
 # Initialize the Pinecone index
 index = pinecone.Index(index_name)
 
-# Initialize the Hugging Face embedding model (text-embedding-3-small)
-hf_model = SentenceTransformer("text-embedding-3-small")
+# Set OpenAI API key
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Function to retrieve similar documents based on a query
 def retrieve(query_text, top_k=5):
@@ -27,8 +27,12 @@ def retrieve(query_text, top_k=5):
     :param top_k: The number of relevant chunks to retrieve
     :return: A list of retrieval results (most relevant document chunks)
     """
-    # Encode the query into an embedding
-    query_embedding = hf_model.encode(query_text).tolist()  # Convert to list of floats for Pinecone
+    # Generate embeddings using OpenAI's `text-embedding-3-small` model
+    response = openai.Embedding.create(
+        model="text-embedding-3-small",
+        input=query_text
+    )
+    query_embedding = response['data'][0]['embedding']
     
     # Perform similarity search in Pinecone
     results = index.query(
@@ -52,4 +56,5 @@ for res in retrieved_results['matches']:
     score = res.get('score', 'No score available')
     
     print(f"Text: {source} | Score: {score} | Content: {content}")
+
 
