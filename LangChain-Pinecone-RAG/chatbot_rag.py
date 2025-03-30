@@ -1,9 +1,9 @@
 import streamlit as st
 import os
 from dotenv import load_dotenv
-import pinecone
+import faiss
 import pdfplumber
-from langchain.vectorstores import PineconeVectorStore
+import numpy as np
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.chat_models import ChatOpenAI
 from langchain.chains import ConversationalRetrievalChain
@@ -13,23 +13,20 @@ load_dotenv()
 
 st.title("Chat with Your PDF")
 
-# Input keys and index
-pinecone_api_key = st.text_input("Pinecone API Key", type="password")
+# Input keys
 openai_api_key = st.text_input("OpenAI API Key", type="password")
-index_name = st.text_input("Pinecone Index Name")
 
-if pinecone_api_key and openai_api_key and index_name:
-    # Initialize Pinecone
-    pinecone.init(api_key=pinecone_api_key, environment="us-west1-gcp")
-    index = pinecone.Index(index_name)
-
-    # Use OpenAI's smaller embedding model (text-embedding-3-small)
+if openai_api_key:
+    # Initialize the OpenAI embedding model (text-embedding-3-small)
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=openai_api_key)
-    vector_store = PineconeVectorStore(index=index, embedding_function=embeddings)
+
+    # Initialize FAISS index
+    dimension = 1536  # Dimension of embeddings for 'text-embedding-3-small'
+    index = faiss.IndexFlatL2(dimension)  # Using L2 (Euclidean) distance for similarity search
 
     # Handle PDF upload
     uploaded_pdf = st.file_uploader("Upload a PDF", type="pdf")
-    
+
     if uploaded_pdf:
         # Read PDF and split into chunks using pdfplumber
         with pdfplumber.open(uploaded_pdf) as pdf:
@@ -39,11 +36,17 @@ if pinecone_api_key and openai_api_key and index_name:
                 if text:
                     chunks.append(text)
 
-        # Store chunks as embeddings in Pinecone
+        # Generate embeddings for each chunk and add to FAISS index
+        embeddings_list = []
         for chunk in chunks:
-            vector_store.add_texts([chunk])
+            embedding = embeddings.embed_text(chunk)
+            embeddings_list.append(embedding)
 
-        st.success("PDF successfully uploaded and stored!")
+        # Convert embeddings list to numpy array and add to FAISS index
+        embeddings_array = np.array(embeddings_list).astype(np.float32)
+        index.add(embeddings_array)
+
+        st.success("PDF successfully uploaded and stored in FAISS!")
 
     # Initialize chat history
     if "messages" not in st.session_state:
@@ -69,10 +72,19 @@ if pinecone_api_key and openai_api_key and index_name:
             st.markdown(prompt)
             st.session_state.messages.append(HumanMessage(prompt))
 
-        # Create the retriever for Pinecone-based retrieval
-        retriever = vector_store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 3, "score_threshold": 0.5})
-        docs = retriever.invoke(prompt)
-        docs_text = "".join([d.page_content for d in docs])
+        # Generate embedding for the user's prompt
+        query_embedding = embeddings.embed_text(prompt)
+
+        # Search the FAISS index for the most similar document chunks
+        query_embedding = np.array(query_embedding).astype(np.float32)
+        distances, indices = index.search(query_embedding.reshape(1, -1), k=3)
+
+        # Retrieve the relevant chunks
+        docs = []
+        for idx in indices[0]:
+            docs.append(chunks[idx])
+
+        docs_text = "".join(docs)
 
         # Create the system prompt for the assistant
         system_prompt = f"""
@@ -97,5 +109,5 @@ if pinecone_api_key and openai_api_key and index_name:
             st.session_state.messages.append(AIMessage(result))
 
 else:
-    st.warning("Please input your Pinecone API key, OpenAI API key, and Pinecone Index name to proceed.")
+    st.warning("Please input your OpenAI API key to proceed.")
 
