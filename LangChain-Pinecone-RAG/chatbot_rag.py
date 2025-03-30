@@ -1,115 +1,100 @@
-import os
 import streamlit as st
-import pdfplumber
-import openai
-from sentence_transformers import SentenceTransformer
+import os
+from dotenv import load_dotenv
+from PyPDF2 import PdfReader
 import pinecone
-from pinecone import Index
+from langchain.vectorstores import PineconeVectorStore
+from langchain.embeddings import OpenAIEmbeddings
+from langchain.chat_models import ChatOpenAI
+from langchain.chains import ConversationalRetrievalChain
+from langchain.prompts import SystemMessage, HumanMessage, AIMessage
 
-st.title("Chat with Your PDF (GPT-4o-mini & Pinecone)")
+load_dotenv()
 
-# User inputs for API keys
-pinecone_api_key = st.text_input("Enter your Pinecone API Key:", type="password")
-pinecone_index_name = st.text_input("Enter your Pinecone Index Name:")
-openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
+st.title("Chat with Your PDF")
 
-# Function to extract text from PDF and chunk it
-def extract_text_from_pdf(pdf_path, chunk_size=500):
-    text_chunks = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
+# Input keys and index
+pinecone_api_key = st.text_input("Pinecone API Key", type="password")
+openai_api_key = st.text_input("OpenAI API Key", type="password")
+index_name = st.text_input("Pinecone Index Name")
+
+if pinecone_api_key and openai_api_key and index_name:
+    # Initialize Pinecone
+    pinecone.init(api_key=pinecone_api_key, environment="us-east1")
+    index = pinecone.Index(index_name)
+
+    # Initialize embeddings model and vector store
+    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    vector_store = PineconeVectorStore(index=index, embedding_function=embeddings)
+
+    # Handle PDF upload
+    uploaded_pdf = st.file_uploader("Upload a PDF", type="pdf")
+    
+    if uploaded_pdf:
+        # Read PDF and split into chunks
+        pdf_reader = PdfReader(uploaded_pdf)
+        chunks = []
+        for page in pdf_reader.pages:
             text = page.extract_text()
             if text:
-                chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-                for idx, chunk in enumerate(chunks):
-                    text_chunks.append((page_num, idx, chunk))
-    return text_chunks
+                chunks.append(text)
 
-if pinecone_api_key and openai_api_key and pinecone_index_name:
-    st.session_state["PINECONE_API_KEY"] = pinecone_api_key
-    st.session_state["PINECONE_INDEX_NAME"] = pinecone_index_name
-    st.session_state["OPENAI_API_KEY"] = openai_api_key
+        # Store chunks as embeddings in Pinecone
+        for chunk in chunks:
+            vector_store.add_texts([chunk])
 
-    # Initialize Pinecone client
-    pinecone.init(api_key=pinecone_api_key, environment="us-east1-gcp")
-    
-    # Create an index if it doesn't exist
-    if pinecone_index_name not in pinecone.list_indexes():
-        pinecone.create_index(
-            name=pinecone_index_name,
-            dimension=512,  # Dimension of the embedding model (use appropriate dimension)
-            metric="cosine"
-        )
-
-    # Access the index
-    index = Index(pinecone_index_name)
-
-    # Use a SentenceTransformer model for embeddings
-    embedding_model = SentenceTransformer("all-MiniLM-L6-v2")  # Can use other lightweight models
-
-    st.success("Pinecone and embeddings model initialized!")
-
-    # File uploader
-    uploaded_file = st.file_uploader("Upload a PDF", type=["pdf"])
-    if uploaded_file:
-        file_path = os.path.join("uploads", uploaded_file.name)
-        os.makedirs("uploads", exist_ok=True)
-        with open(file_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.success("File uploaded successfully. Processing...")
-
-        # Extract and chunk text
-        pdf_chunks = extract_text_from_pdf(file_path)
-        documents = [
-            {"content": chunk, "metadata": {"page": page_num, "chunk": idx}}
-            for page_num, idx, chunk in pdf_chunks
-        ]
-
-        # Embed text and store in Pinecone
-        embeddings = [embedding_model.encode(doc["content"]) for doc in documents]
-        vectors_to_upsert = [
-            {"id": f"{doc['metadata']['page']}_{doc['metadata']['chunk']}", "values": embedding, "metadata": doc['metadata']}
-            for doc, embedding in zip(documents, embeddings)
-        ]
-        index.upsert(vectors=vectors_to_upsert)
-
-        st.success("File processed and stored in Pinecone.")
+        st.success("PDF successfully uploaded and stored!")
 
     # Initialize chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
-        st.session_state.messages.append({"role": "system", "content": "You are an AI assistant."})
+        st.session_state.messages.append(SystemMessage("You are an assistant for question-answering tasks."))
 
-    # Chat input
-    prompt = st.text_input("Ask a question about the document:")
+    # Display chat history
+    for message in st.session_state.messages:
+        if isinstance(message, HumanMessage):
+            with st.chat_message("user"):
+                st.markdown(message.content)
+        elif isinstance(message, AIMessage):
+            with st.chat_message("assistant"):
+                st.markdown(message.content)
+
+    # Create a prompt for the user
+    prompt = st.chat_input("Ask a question about the PDF")
+
+    # Did the user submit a prompt?
     if prompt:
+        # Add the user message to the history
         with st.chat_message("user"):
             st.markdown(prompt)
-            st.session_state.messages.append({"role": "user", "content": prompt})
+            st.session_state.messages.append(HumanMessage(prompt))
 
-        # Retrieve context from Pinecone
-        query_embedding = embedding_model.encode(prompt)
-        results = index.query(query_embedding, top_k=3, include_metadata=True)
+        # Create the retriever for Pinecone-based retrieval
+        retriever = vector_store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 3, "score_threshold": 0.5})
+        docs = retriever.invoke(prompt)
+        docs_text = "".join([d.page_content for d in docs])
 
-        context = "\n".join([f"Page {match['metadata']['page']}, Chunk {match['metadata']['chunk']}: {match['metadata']['content']}" for match in results['matches']])
+        # Create the system prompt for the assistant
+        system_prompt = f"""
+        You are an assistant for question-answering tasks. 
+        Use the following pieces of retrieved context to answer the question. 
+        If you don't know the answer, just say that you don't know. 
+        Context: {docs_text}
+        """
 
-        system_prompt = f"Context: {context}\n\nAnswer the user's question based on the above context."
-        st.session_state.messages.append({"role": "system", "content": system_prompt})
+        # Add system prompt to message history
+        st.session_state.messages.append(SystemMessage(system_prompt))
 
-        # Invoke GPT-4o-mini for response
-        openai.api_key = openai_api_key
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
-            temperature=0.2,
-            max_tokens=300
-        )
-        result = response["choices"][0]["message"]["content"]
+        # Initialize GPT-4o-mini model
+        llm = ChatOpenAI(model="gpt-4o-mini", api_key=openai_api_key)
 
+        # Invoke the model with the message history
+        result = llm.invoke(st.session_state.messages).content
+
+        # Display the assistant's response
         with st.chat_message("assistant"):
             st.markdown(result)
-            st.session_state.messages.append({"role": "assistant", "content": result})
+            st.session_state.messages.append(AIMessage(result))
 
 else:
-    st.warning("Please enter your API keys to proceed.")
-
+    st.warning("Please input your Pinecone API key, OpenAI API key, and Pinecone Index name to proceed.")
