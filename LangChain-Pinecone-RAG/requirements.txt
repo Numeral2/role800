@@ -113,3 +113,5 @@ filelock
 torch
 scikit-learn
 tokenizers
+faiss-cpu  # Add FAISS for efficient similarity search
+
